@@ -20,10 +20,10 @@ def main() -> None:
     Nx, L, lam, sigma = 64, 1.0, 2.0, 0.05
     print(f"(a) homogeneous lambda = {lam}, concentrated IC")
     field = LambdaField(Nx, L).add_background(lam).build()
-    sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.005)
-    res = sim.run(concentrated(Nx, L, u0=(0.40, 0.30, 0.30)), t_max=60.0, save_every=20)
+    sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.02)
+    res = sim.run(concentrated(Nx, L, u0=(0.40, 0.30, 0.30)), t_max=60.0, save_every=5)
     report_frequencies(res, {"f0": lam / np.sqrt(3) / (2 * np.pi)}, n=1)
-    save_outputs(res, "a_omega0", stride=3, contrast=6.0)
+    save_outputs(res, "a_omega0", contrast=6.0)
 
 
 if __name__ == "__main__":

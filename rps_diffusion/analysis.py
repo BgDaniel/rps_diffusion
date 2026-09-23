@@ -73,7 +73,11 @@ def _draw_spectrum(ax: Axes, freqs: np.ndarray, power: np.ndarray, result: SimRe
                            label=r"$f_0=\omega_0/2\pi$" if k == 1 else f"{k}$f_0$")
     ax.set_xlabel("frequency  [1 / time]")
     ax.set_ylabel("power")
-    ax.set_xlim(0, min(freqs[-1], 6 * f0) if f0 > 0 else freqs[-1])
+    # Show 6 f0 or 1.5x the strongest peaks, whichever is wider (λ may vary in space).
+    peaks, _ = find_peaks(power[1:])
+    top = freqs[peaks[np.argsort(power[peaks + 1])[-3:]] + 1] if peaks.size else np.array([0.0])
+    ax.set_xlim(0, min(freqs[-1], max(6 * f0, 1.5 * top.max())))
+    ax.set_ylim(power[1:].max() * 1e-8, power[1:].max() * 5)
     ax.legend(fontsize=8)
 
 

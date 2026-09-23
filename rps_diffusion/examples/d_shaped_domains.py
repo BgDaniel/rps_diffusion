@@ -24,9 +24,9 @@ def main() -> None:
     field = LambdaField(Nx, L).add_background(2.0).add_disk(5.0, 0.5, 0.5, 0.3).build()
     for name, dom in (("d_ring", ring), ("d_obstacles", obstacles)):
         print(f"(d) {name}: {dom}")
-        sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.005, domain=dom)
-        res = sim.run(blobs(Nx, L, n_blobs=8, seed=1), t_max=30.0, save_every=20)
-        save_outputs(res, name, stride=1, spectrum=False)
+        sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.02, domain=dom)
+        res = sim.run(blobs(Nx, L, n_blobs=8, seed=1), t_max=30.0, save_every=5)
+        save_outputs(res, name, spectrum=False)
 
 
 if __name__ == "__main__":

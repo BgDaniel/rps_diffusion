@@ -71,3 +71,27 @@ def test_mean_fraction_oscillates_at_omega0(domain: Domain | None) -> None:
     freqs, power = frequency_spectrum(res, species=1)
     assert freqs.shape == power.shape
     assert freqs[np.argmax(power[1:]) + 1] == pytest.approx(f0, abs=2 * (freqs[1] - freqs[0]))
+
+
+@pytest.mark.filterwarnings("ignore:.*inflate the reaction cycles")
+def test_heun_preserves_neutral_cycle_better_than_euler() -> None:
+    """The RPS ODE conserves ρ_S ρ_R ρ_P; Heun drifts far less than Euler."""
+    Nx, lam = 8, 3.0
+    rho0 = concentrated(Nx, radius=1.0, u0=(0.5, 0.3, 0.2))
+    invariant0 = rho0.prod(axis=0).mean()
+    drift = {}
+    for method in ("euler", "heun"):
+        sim = RPSSimulator(np.full((Nx, Nx), lam), sigma=0.0, dt=0.02, method=method)
+        res = sim.run(rho0, 20.0, save_every=1000, progress=False)
+        drift[method] = abs(res.snapshots[-1].prod(axis=0).mean() - invariant0)
+    assert drift["heun"] < 0.05 * drift["euler"]
+
+
+def test_make_video_gif_fallback(tmp_path, monkeypatch) -> None:
+    import rps_diffusion.visualize as vis
+
+    monkeypatch.setattr(vis, "_ffmpeg_path", lambda: None)
+    sim = RPSSimulator(np.full((24, 24), 2.0), sigma=0.05, dt=0.01, domain=Domain.disk(24))
+    res = sim.run(blobs(24), 1.0, save_every=10, progress=False)
+    out = vis.make_video(res, tmp_path / "v.mp4", max_frames=5)
+    assert out.suffix == ".gif" and out.stat().st_size > 0

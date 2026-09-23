@@ -17,9 +17,9 @@ def main() -> None:
     Nx, L, lam, sigma = 128, 1.0, 5.0, 0.03
     print(f"(c) stripes, lambda = {lam}, sigma = {sigma}")
     field = LambdaField(Nx, L).add_background(lam).build()
-    sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.005)
-    res = sim.run(stripes(Nx, axis="x"), t_max=30.0, save_every=20)
-    save_outputs(res, "c_stripe_fronts", stride=1, spectrum=False)
+    sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.02)
+    res = sim.run(stripes(Nx, axis="x"), t_max=30.0, save_every=5)
+    save_outputs(res, "c_stripe_fronts", spectrum=False)
 
 
 if __name__ == "__main__":

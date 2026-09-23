@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["NeighbourMasks", "neighbour_masks", "laplacian_neumann", "max_stable_dt"]
+__all__ = ["Faces", "neighbour_masks", "laplacian_neumann", "max_stable_dt"]
 
-NeighbourMasks = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+#: Open-face indicators ``(fy, fx)`` of shapes ``(Ny-1, Nx)`` and ``(Ny, Nx-1)``.
+Faces = tuple[np.ndarray, np.ndarray]
 
 
-def neighbour_masks(mask: np.ndarray) -> NeighbourMasks:
-    """Precompute which cell faces are open (both adjacent cells inside the domain).
+def neighbour_masks(mask: np.ndarray) -> Faces:
+    """Precompute which interior cell faces are open (both adjacent cells inside).
 
     Parameters
     ----------
@@ -19,34 +20,35 @@ def neighbour_masks(mask: np.ndarray) -> NeighbourMasks:
 
     Returns
     -------
-    tuple of np.ndarray
-        Float arrays ``(up, down, left, right)`` of shape ``(Ny, Nx)``. Entry
-        ``[j, i]`` of ``right`` is 1 if cell ``(j, i)`` and its neighbour
-        ``(j, i+1)`` are both inside the domain, else 0. Closed faces carry no
-        flux, which is the discrete no-flux (Neumann) boundary condition.
+    fy, fx : np.ndarray
+        Float arrays of shape ``(Ny-1, Nx)`` and ``(Ny, Nx-1)``. ``fy[j, i]``
+        is 1 if cells ``(j, i)`` and ``(j+1, i)`` are both inside the domain,
+        ``fx[j, i]`` likewise for ``(j, i)`` and ``(j, i+1)``. Closed faces
+        carry no flux, which is the discrete no-flux (Neumann) condition.
     """
     m = np.asarray(mask, dtype=bool)
-    p = np.pad(m, 1, mode="constant", constant_values=False)
-    up = (m & p[2:, 1:-1]).astype(float)
-    down = (m & p[:-2, 1:-1]).astype(float)
-    right = (m & p[1:-1, 2:]).astype(float)
-    left = (m & p[1:-1, :-2]).astype(float)
-    return up, down, left, right
+    fy = (m[1:, :] & m[:-1, :]).astype(float)
+    fx = (m[:, 1:] & m[:, :-1]).astype(float)
+    return fy, fx
 
 
 def laplacian_neumann(
     u: np.ndarray,
     dx: float,
-    faces: NeighbourMasks | None = None,
+    faces: Faces | None = None,
+    out: np.ndarray | None = None,
+    work: tuple[np.ndarray, np.ndarray] | None = None,
+    scale: float = 1.0,
 ) -> np.ndarray:
     """Five-point finite-volume Laplacian with no-flux boundary conditions.
 
-    For every cell the Laplacian is the sum of the fluxes through its four
-    faces, ``sum_j (u_j - u_i) / dx**2``, where only open faces (both cells
-    inside the domain) contribute. On the full square this is identical to the
-    classical ghost-cell scheme with ``u_ghost = u_boundary``; on an arbitrary
-    masked domain it enforces zero normal flux on the staircase boundary and
-    conserves ``sum(u)`` over the domain exactly.
+    The Laplacian of a cell is the sum of the fluxes ``(u_j - u_i) / dx²``
+    through its open faces. Faces on the edge of the bounding box, and faces
+    between an inside and an outside cell, are closed. On the full square
+    this is identical to the ghost-cell scheme with
+    ``u_ghost = u_boundary``. On any masked domain it enforces zero normal
+    flux on the staircase boundary and conserves ``sum(u)`` over the domain
+    exactly.
 
     Parameters
     ----------
@@ -54,29 +56,48 @@ def laplacian_neumann(
         Field of shape ``(..., Ny, Nx)``. Leading axes are treated as a batch.
     dx : float
         Grid spacing (identical in both directions).
-    faces : NeighbourMasks, optional
+    faces : Faces, optional
         Output of :func:`neighbour_masks`. ``None`` means the full rectangle.
+    out : np.ndarray, optional
+        Preallocated result array with the shape of ``u``.
+    work : tuple of np.ndarray, optional
+        Preallocated flux buffers of shapes ``(..., Ny-1, Nx)`` and
+        ``(..., Ny, Nx-1)``, which avoid temporary allocations in hot loops.
+    scale : float, default 1.0
+        Factor applied to the result (e.g. the diffusion coefficient).
 
     Returns
     -------
     np.ndarray
-        Array of the same shape as ``u``. Values outside the domain are 0.
+        ``scale * ∇²u``, with the shape of ``u``. Values outside the domain
+        are 0.
     """
-    p = np.pad(u, [(0, 0)] * (u.ndim - 2) + [(1, 1), (1, 1)], mode="edge")
-    c = p[..., 1:-1, 1:-1]
-    d_up = p[..., 2:, 1:-1] - c
-    d_down = p[..., :-2, 1:-1] - c
-    d_right = p[..., 1:-1, 2:] - c
-    d_left = p[..., 1:-1, :-2] - c
-    if faces is None:
-        # Edge padding makes boundary differences vanish: ghost-cell Neumann BC.
-        return (d_up + d_down + d_left + d_right) / dx**2
-    up, down, left, right = faces
-    return (up * d_up + down * d_down + left * d_left + right * d_right) / dx**2
+    if out is None:
+        out = np.empty_like(u, dtype=float)
+    if work is None:
+        work = (np.empty(u.shape[:-2] + (u.shape[-2] - 1, u.shape[-1])),
+                np.empty(u.shape[:-1] + (u.shape[-1] - 1,)))
+    gy, gx = work
+
+    out.fill(0.0)
+    np.subtract(u[..., 1:, :], u[..., :-1, :], out=gy)
+    np.subtract(u[..., :, 1:], u[..., :, :-1], out=gx)
+    if faces is not None:
+        gy *= faces[0]
+        gx *= faces[1]
+    out[..., :-1, :] += gy
+    out[..., 1:, :] -= gy
+    out[..., :, :-1] += gx
+    out[..., :, 1:] -= gx
+    out *= scale / dx**2
+    return out
 
 
 def max_stable_dt(dx: float, D: float, ndim: int = 2) -> float:
-    """Largest stable explicit-Euler time step for the diffusion equation.
+    """Largest stable explicit time step for the diffusion equation.
+
+    Holds for both explicit Euler and Heun (RK2), whose stability regions
+    cover the same interval ``[-2, 0]`` of the negative real axis.
 
     Parameters
     ----------

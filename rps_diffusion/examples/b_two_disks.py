@@ -29,10 +29,10 @@ def main() -> None:
         .add_disk(lam2, 0.72, 0.72, 0.2)
         .build()
     )
-    sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.005)
-    res = sim.run(homogeneous(Nx, (0.37, 0.315, 0.315)), t_max=80.0, save_every=20)
+    sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.02)
+    res = sim.run(homogeneous(Nx, (0.37, 0.315, 0.315)), t_max=80.0, save_every=5)
     report_frequencies(res, {"f(lam1)": _freq(lam1), "f(lam2)": _freq(lam2)}, n=2)
-    save_outputs(res, "b_two_disks", stride=4, contrast=5.0)
+    save_outputs(res, "b_two_disks", contrast=5.0)
 
 
 if __name__ == "__main__":

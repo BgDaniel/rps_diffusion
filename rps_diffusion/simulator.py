@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -19,6 +20,12 @@ from tqdm.auto import tqdm
 from ._numerics import laplacian_neumann, max_stable_dt, neighbour_masks
 from .domain import Domain
 from .initial import normalise
+
+Method = Literal["heun", "euler"]
+
+#: Largest λ_max·dt before a warning, per method. Per step, explicit Euler
+#: inflates a neutral cycle by about (ω dt)²/2, Heun only by about (ω dt)⁴/8.
+_REACTION_DT_WARN: dict[str, float] = {"euler": 0.05, "heun": 0.25}
 
 __all__ = ["SimResult", "RPSSimulator", "reaction"]
 
@@ -38,8 +45,30 @@ def reaction(rho: np.ndarray) -> np.ndarray:
     np.ndarray
         ``(f_S, f_R, f_P)`` with the same shape as ``rho``.
     """
+    out = np.empty_like(rho, dtype=float)
+    _reaction_into(rho, out)
+    return out
+
+
+def _reaction_into(rho: np.ndarray, out: np.ndarray) -> None:
     s, r, p = rho
-    return np.stack([s * (p - r), r * (s - p), p * (r - s)])
+    np.subtract(p, r, out=out[0])
+    out[0] *= s
+    np.subtract(s, p, out=out[1])
+    out[1] *= r
+    np.subtract(r, s, out=out[2])
+    out[2] *= p
+
+
+def _normalise_inplace(rho: np.ndarray, total: np.ndarray) -> None:
+    np.clip(rho, 0.0, 1.0, out=rho)
+    np.add(rho[0], rho[1], out=total)
+    total += rho[2]
+    if not total.all():  # a cell lost every species: reset it to the centre
+        empty = total == 0.0
+        rho[:, empty] = 1.0 / 3.0
+        total[empty] = 1.0
+    rho /= total
 
 
 @dataclass
@@ -94,7 +123,7 @@ class SimResult:
 
 
 class RPSSimulator:
-    """Explicit-Euler finite-difference solver for the RPS reaction-diffusion PDE.
+    """Explicit finite-difference solver (Heun or Euler) for the RPS reaction-diffusion PDE.
 
     Parameters
     ----------
@@ -114,6 +143,11 @@ class RPSSimulator:
         Shape of the domain, as a :class:`~rps_diffusion.Domain` or a boolean
         ``(Nx, Nx)`` mask. ``None`` means the full square. No-flux boundary
         conditions hold on the boundary of whatever shape is given.
+    method : {'heun', 'euler'}, default 'heun'
+        Time integrator. ``'heun'`` (explicit trapezoidal RK2) is
+        second-order accurate and permits a much larger ``dt`` than forward
+        ``'euler'`` for the same accuracy of the reaction cycles. Both have
+        the same diffusive stability limit.
 
     Raises
     ------
@@ -131,6 +165,7 @@ class RPSSimulator:
         dt: float = 0.005,
         Nx: int | None = None,
         domain: Domain | np.ndarray | None = None,
+        method: Method = "heun",
     ) -> None:
         lam = np.asarray(lambda_field, dtype=float)
         if lam.ndim != 2 or lam.shape[0] != lam.shape[1]:
@@ -143,6 +178,8 @@ class RPSSimulator:
             raise ValueError("lambda_field must be non-negative")
         if sigma < 0 or L <= 0 or dt <= 0:
             raise ValueError("require sigma >= 0, L > 0, dt > 0")
+        if method not in _REACTION_DT_WARN:
+            raise ValueError(f"unknown method {method!r}; use 'heun' or 'euler'")
 
         if domain is None:
             mask = np.ones((Nx, Nx), dtype=bool)
@@ -163,6 +200,7 @@ class RPSSimulator:
         self.sigma: float = float(sigma)
         self.D: float = 0.5 * self.sigma**2
         self.dt: float = float(dt)
+        self.method: Method = method
         self.mask: np.ndarray = mask
         self.lambda_field: np.ndarray = np.where(mask, lam, 0.0)
         self._faces = None if mask.all() else neighbour_masks(mask)
@@ -174,12 +212,21 @@ class RPSSimulator:
                 f"(dx = {self.dx:g}, D = σ²/2 = {self.D:g})"
             )
         lam_max = float(self.lambda_field.max())
-        if lam_max * self.dt > 0.05:
+        if lam_max * self.dt > _REACTION_DT_WARN[method]:
             warnings.warn(
-                f"λ_max·dt = {lam_max * self.dt:.3g} is large; explicit Euler will visibly "
-                "inflate the reaction cycles. Consider a smaller dt.",
+                f"λ_max·dt = {lam_max * self.dt:.3g} is large for method {method!r}; the "
+                "integrator will visibly inflate the reaction cycles. Consider a smaller dt.",
                 stacklevel=2,
             )
+
+        # Preallocated buffers for the in-place stepping kernel.
+        shape = (3, self.Nx, self.Nx)
+        self._k1 = np.empty(shape)
+        self._k2 = np.empty(shape)
+        self._tmp = np.empty(shape)
+        self._lap = np.empty(shape)
+        self._total = np.empty((self.Nx, self.Nx))
+        self._work = (np.empty((3, self.Nx - 1, self.Nx)), np.empty((3, self.Nx, self.Nx - 1)))
 
     # ------------------------------------------------------------------
     def rhs(self, rho: np.ndarray) -> np.ndarray:
@@ -195,13 +242,35 @@ class RPSSimulator:
         np.ndarray
             Time derivative, shape ``(3, Nx, Nx)``.
         """
-        out = self.lambda_field * reaction(rho)
-        if self.D > 0:
-            out += self.D * laplacian_neumann(rho, self.dx, self._faces)
+        out = np.empty((3, self.Nx, self.Nx))
+        self._rhs_into(rho, out)
         return out
 
+    def _rhs_into(self, rho: np.ndarray, out: np.ndarray) -> None:
+        _reaction_into(rho, out)
+        out *= self.lambda_field
+        if self.D > 0:
+            laplacian_neumann(rho, self.dx, self._faces, out=self._lap, work=self._work, scale=self.D)
+            out += self._lap
+
+    def _step_inplace(self, rho: np.ndarray) -> None:
+        dt, k1 = self.dt, self._k1
+        self._rhs_into(rho, k1)
+        if self.method == "euler":
+            k1 *= dt
+            rho += k1
+        else:  # Heun: predictor with Euler, corrector with the trapezoidal rule
+            k2, tmp = self._k2, self._tmp
+            np.multiply(k1, dt, out=tmp)
+            tmp += rho
+            self._rhs_into(tmp, k2)
+            k1 += k2
+            k1 *= 0.5 * dt
+            rho += k1
+        _normalise_inplace(rho, self._total)
+
     def step(self, rho: np.ndarray) -> np.ndarray:
-        """Advance one explicit-Euler step, then clip and renormalise.
+        """Advance one time step, then clip and renormalise.
 
         Parameters
         ----------
@@ -213,7 +282,9 @@ class RPSSimulator:
         np.ndarray
             New state with ``ρ_S + ρ_R + ρ_P = 1`` in every cell.
         """
-        return normalise(rho + self.dt * self.rhs(rho))
+        new = np.array(rho, dtype=float)
+        self._step_inplace(new)
+        return new
 
     def _record(self, rho: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         inside = rho[:, self.mask]
@@ -271,7 +342,7 @@ class RPSSimulator:
 
         record(0)
         for n in tqdm(range(1, n_steps + 1), disable=not progress, desc="RPS", unit="step"):
-            rho = self.step(rho)
+            self._step_inplace(rho)
             if n % save_every == 0:
                 record(n)
 
