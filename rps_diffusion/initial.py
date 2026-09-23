@@ -58,8 +58,13 @@ def homogeneous(Nx: int, u0: tuple[float, float, float] = (1 / 3, 1 / 3, 1 / 3))
     return normalise(np.broadcast_to(u, (3, Nx, Nx)).copy())
 
 
-def random_perturbation(Nx: int, noise: float = 0.05, seed: int = 0) -> np.ndarray:
-    """Gaussian noise around the coexistence point ``(1/3, 1/3, 1/3)``.
+def random_perturbation(
+    Nx: int,
+    noise: float = 0.05,
+    seed: int = 0,
+    background: tuple[float, float, float] = (1 / 3, 1 / 3, 1 / 3),
+) -> np.ndarray:
+    """Gaussian noise around a coexistence state.
 
     Parameters
     ----------
@@ -69,6 +74,8 @@ def random_perturbation(Nx: int, noise: float = 0.05, seed: int = 0) -> np.ndarr
         Standard deviation of the independent per-cell, per-species noise.
     seed : int, default 0
         Seed of the random generator.
+    background : tuple of float, default (1/3, 1/3, 1/3)
+        State to perturb, e.g. the fixed point ``fixed_point(rates)``.
 
     Returns
     -------
@@ -76,7 +83,8 @@ def random_perturbation(Nx: int, noise: float = 0.05, seed: int = 0) -> np.ndarr
         Array of shape ``(3, Nx, Nx)``.
     """
     rng = np.random.default_rng(seed)
-    return normalise(1.0 / 3.0 + noise * rng.standard_normal((3, Nx, Nx)))
+    base = np.asarray(background, dtype=float).reshape(3, 1, 1)
+    return normalise(base / base.sum() + noise * rng.standard_normal((3, Nx, Nx)))
 
 
 def stripes(Nx: int, axis: Literal["x", "y"] = "x") -> np.ndarray:
@@ -139,11 +147,13 @@ def concentrated(
     centre: tuple[float, float] = (0.5, 0.5),
     radius: float = 0.15,
     u0: tuple[float, float, float] = (0.35, 0.32, 0.33),
+    background: tuple[float, float, float] = (1 / 3, 1 / 3, 1 / 3),
 ) -> np.ndarray:
-    """Given fractions inside a disk, coexistence point outside.
+    """Given fractions inside a disk, a coexistence state outside.
 
-    The small localised perturbation keeps the dynamics in the linear
-    regime, so the mean fractions oscillate cleanly at ``ω₀ = λ / √3``.
+    A small localised perturbation of the fixed point keeps the dynamics in
+    the linear regime, so the mean fractions oscillate cleanly at
+    ``ω₀ = √(λ_S λ_R λ_P / Σλ)`` (``λ / √3`` for equal rates).
 
     Parameters
     ----------
@@ -157,6 +167,8 @@ def concentrated(
         Disk radius in units of ``L``.
     u0 : tuple of float, default (0.35, 0.32, 0.33)
         Fractions inside the disk; rescaled to sum to 1.
+    background : tuple of float, default (1/3, 1/3, 1/3)
+        Fractions outside the disk, e.g. the fixed point ``fixed_point(rates)``.
 
     Returns
     -------
@@ -165,7 +177,7 @@ def concentrated(
     """
     X, Y = grid(Nx, L)
     inside = (X - centre[0] * L) ** 2 + (Y - centre[1] * L) ** 2 <= (radius * L) ** 2
-    rho = homogeneous(Nx)
+    rho = homogeneous(Nx, background)
     u = np.asarray(u0, dtype=float)
     rho[:, inside] = (u / u.sum())[:, None]
     return rho

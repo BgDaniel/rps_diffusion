@@ -1,28 +1,11 @@
-"""Tests for Domain, LambdaField and the initial-condition factories."""
+"""Tests for Domain and the initial-condition factories."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from rps_diffusion import Domain, LambdaField, blobs, concentrated, homogeneous, random_perturbation, stripes
-
-
-def test_lambda_field_layers_in_order() -> None:
-    lam = (
-        LambdaField(40, 1.0)
-        .add_background(1.0)
-        .add_square(2.0, 0.0, 0.0, 0.5)
-        .add_disk(3.0, 0.25, 0.25, 0.1)
-        .add_annulus(4.0, 0.75, 0.75, 0.1, 0.2)
-        .build()
-    )
-    assert lam.shape == (40, 40)
-    assert lam[0, 39] == 1.0  # cell (x, y) ≈ (0.99, 0.01): outside the square -> background
-    assert lam[2, 2] == 2.0  # inside square, outside disk
-    assert lam[10, 10] == 3.0  # disk centre overwrites square
-    assert lam[30, 30] == 1.0  # annulus hole
-    assert set(np.unique(lam)) == {1.0, 2.0, 3.0, 4.0}
+from rps_diffusion import Domain, blobs, concentrated, homogeneous, random_perturbation, stripes
 
 
 def test_domain_shapes() -> None:
@@ -56,6 +39,8 @@ def test_domain_disconnected_warns() -> None:
         stripes(16, axis="y"),
         blobs(16),
         concentrated(16),
+        concentrated(16, background=(0.2, 0.3, 0.5)),
+        random_perturbation(16, background=(0.5, 0.2, 0.3)),
     ],
 )
 def test_initial_conditions_are_simplex_valued(rho: np.ndarray) -> None:

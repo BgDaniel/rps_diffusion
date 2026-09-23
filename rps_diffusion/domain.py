@@ -1,4 +1,4 @@
-"""Spatial geometry: simulation domains of arbitrary shape and the λ(x, y) rate field.
+"""Spatial geometry: simulation domains of arbitrary shape.
 
 All objects live on a cell-centred grid covering the bounding box ``[0, L]²``
 with ``Nx × Nx`` cells. Cell ``[j, i]`` has centre ``((i + ½) dx, (j + ½) dx)``
@@ -14,7 +14,7 @@ import numpy as np
 from matplotlib.path import Path
 from scipy import ndimage
 
-__all__ = ["grid", "Domain", "LambdaField"]
+__all__ = ["grid", "Domain"]
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ def _polygon_mask(X: np.ndarray, Y: np.ndarray, vertices: Sequence[tuple[float, 
 
 
 class _Grid:
-    """Shared grid bookkeeping for :class:`Domain` and :class:`LambdaField`."""
+    """Grid bookkeeping for :class:`Domain`."""
 
     def __init__(self, Nx: int, L: float) -> None:
         if Nx < 3:
@@ -271,78 +271,3 @@ class Domain(_Grid):
 
     def __repr__(self) -> str:
         return f"Domain(Nx={self.Nx}, L={self.L}, cells={self.n_cells}, area={self.area:.4g})"
-
-
-# ---------------------------------------------------------------------------
-# LambdaField
-# ---------------------------------------------------------------------------
-class LambdaField(_Grid):
-    """Builder for the spatially varying interaction rate λ(x, y).
-
-    Regions are painted in the order they are added: a later region
-    overwrites earlier values where it applies. All ``add_*`` methods return
-    ``self`` so they can be chained.
-
-    Parameters
-    ----------
-    Nx : int
-        Number of grid cells per axis.
-    L : float
-        Side length of the bounding square ``[0, L]²``.
-
-    Examples
-    --------
-    >>> lam = (LambdaField(64, 1.0)
-    ...        .add_background(0.5)
-    ...        .add_disk(2.0, 0.3, 0.3, 0.15)
-    ...        .add_disk(5.0, 0.7, 0.7, 0.15)
-    ...        .build())
-    """
-
-    def __init__(self, Nx: int, L: float = 1.0) -> None:
-        super().__init__(Nx, L)
-        self._field = np.zeros((self.Nx, self.Nx), dtype=float)
-
-    def _paint(self, region: np.ndarray, lam: float) -> LambdaField:
-        if lam < 0:
-            raise ValueError("lam must be non-negative")
-        self._field[region] = float(lam)
-        return self
-
-    def add_background(self, lam: float) -> LambdaField:
-        """Set the whole field to ``lam``."""
-        return self._paint(np.ones_like(self._field, dtype=bool), lam)
-
-    def add_square(self, lam: float, x0: float, y0: float, w: float) -> LambdaField:
-        """Set ``lam`` on the axis-aligned square with corner ``(x0, y0)`` and side ``w``."""
-        return self._paint(_rect_mask(self.X, self.Y, x0, y0, w, w), lam)
-
-    def add_rectangle(self, lam: float, x0: float, y0: float, w: float, h: float) -> LambdaField:
-        """Set ``lam`` on the axis-aligned rectangle with corner ``(x0, y0)``."""
-        return self._paint(_rect_mask(self.X, self.Y, x0, y0, w, h), lam)
-
-    def add_disk(self, lam: float, cx: float, cy: float, r: float) -> LambdaField:
-        """Set ``lam`` on the filled disk with centre ``(cx, cy)`` and radius ``r``."""
-        return self._paint(_disk_mask(self.X, self.Y, cx, cy, r), lam)
-
-    def add_annulus(
-        self, lam: float, cx: float, cy: float, r_inner: float, r_outer: float
-    ) -> LambdaField:
-        """Set ``lam`` on the ring between ``r_inner`` and ``r_outer`` around ``(cx, cy)``."""
-        return self._paint(_annulus_mask(self.X, self.Y, cx, cy, r_inner, r_outer), lam)
-
-    def add_polygon(self, lam: float, vertices: Sequence[tuple[float, float]]) -> LambdaField:
-        """Set ``lam`` inside the polygon with the given vertices."""
-        return self._paint(_polygon_mask(self.X, self.Y, vertices), lam)
-
-    def add_function(self, func: Callable[[np.ndarray, np.ndarray], np.ndarray]) -> LambdaField:
-        """Overwrite the field with ``func(X, Y)`` (smooth λ profiles, gradients, ...)."""
-        values = np.broadcast_to(np.asarray(func(self.X, self.Y), dtype=float), self._field.shape)
-        if np.any(values < 0):
-            raise ValueError("lambda must be non-negative")
-        self._field = values.copy()
-        return self
-
-    def build(self) -> np.ndarray:
-        """Return the ``(Nx, Nx)`` λ array (a copy)."""
-        return self._field.copy()

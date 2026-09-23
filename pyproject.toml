@@ -1,7 +1,7 @@
 [project]
 name = "rps-diffusion"
-version = "0.1.0"
-description = "Simulator for the cyclic Rock-Paper-Scissors reaction-diffusion PDE with spatially varying interaction rate."
+version = "0.2.0"
+description = "Simulator for the cyclic Rock-Paper-Scissors reaction-diffusion PDE with three cyclic interaction rates on arbitrary domains."
 authors = [{ name = "Daniel Berger", email = "daniel.bergermat@t-online.de" }]
 readme = "README.md"
 requires-python = ">=3.11"

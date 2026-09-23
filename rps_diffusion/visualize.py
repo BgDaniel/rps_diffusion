@@ -15,7 +15,6 @@ from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from PIL import Image
-from scipy import ndimage
 
 from .domain import grid
 from .simulator import SPECIES, SimResult
@@ -26,7 +25,6 @@ __all__ = [
     "describe_parameters",
     "make_video",
     "plot_fractions",
-    "plot_lambda",
     "plot_snapshot",
     "plot_surfaces",
 ]
@@ -180,23 +178,16 @@ def describe_parameters(result: SimResult) -> str:
     Returns
     -------
     str
-        For example ``"σ = 0.02  ·  λ ∈ {0, 1.5, 4.5}, λ̄ = 0.63  ·  L = 1, Nx = 64,
-        dt = 0.02  ·  full square"`` (with matplotlib mathtext symbols).
+        Noise σ, the three interaction rates, the fixed point ρ*, ω₀ and the
+        grid, in matplotlib mathtext.
     """
-    lam = result.lambda_field[result.mask]
-    values = np.unique(np.round(lam, 6))
-    if values.size == 1:
-        lam_s = rf"$\lambda$ = {values[0]:g}"
-    else:
-        spread = ("{" + ", ".join(f"{v:g}" for v in values) + "}") if values.size <= 4 \
-            else f"[{values.min():g}, {values.max():g}]"
-        lam_s = rf"$\lambda \in$ {spread},  $\bar\lambda$ = {lam.mean():.3g}"
-    if result.mask.all():
-        dom = "full square"
-    else:
-        dom = f"shaped domain ({result.mask.mean():.0%} of the box)"
-    return (rf"$\sigma$ = {result.sigma:g}    ·    {lam_s}    ·    "
-            f"L = {result.L:g}, Nx = {result.Nx}, dt = {result.dt:g}    ·    {dom}")
+    lS, lR, lP = result.rates
+    rs = result.fixed_point
+    dom = "full square" if result.mask.all() else f"shaped domain ({result.mask.mean():.0%} of box)"
+    return (rf"$\sigma$ = {result.sigma:g}   ·   $\lambda_S$ = {lS:g},  $\lambda_R$ = {lR:g},  "
+            rf"$\lambda_P$ = {lP:g}   ·   $\rho^*$ = ({rs[0]:.3f}, {rs[1]:.3f}, {rs[2]:.3f}),  "
+            rf"$\omega_0$ = {result.omega0:.3g}   ·   "
+            f"L = {result.L:g}, Nx = {result.Nx}, dt = {result.dt:g}, {dom}")
 
 
 # ---------------------------------------------------------------------------
@@ -212,8 +203,9 @@ def plot_fractions(result: SimResult, ax: Axes | None = None, show_omega0: bool 
     ax : matplotlib.axes.Axes, optional
         Target axes; a new figure is created if omitted.
     show_omega0 : bool, default True
-        Draw a horizontal bracket of length ``T₀ = 2π√3 / λ_mean``, the
-        period of the linearised dynamics around ``(1/3, 1/3, 1/3)``.
+        Draw a horizontal bracket of length ``T₀ = 2π / ω₀`` with
+        ``ω₀ = √(λ_S λ_R λ_P / Σλ)``, the period of the linearised dynamics
+        around the fixed point ``ρ*`` (dotted lines).
 
     Returns
     -------
@@ -224,14 +216,15 @@ def plot_fractions(result: SimResult, ax: Axes | None = None, show_omega0: bool 
         _, ax = plt.subplots(figsize=(8, 4))
     for k, name in enumerate(SPECIES):
         ax.plot(result.t, result.fractions[:, k], color=COLORS[name], lw=1.4, label=f"$u_{name}$")
-    ax.axhline(1 / 3, color="0.6", lw=0.8, ls=":")
+    for k, name in enumerate(SPECIES):
+        ax.axhline(result.fixed_point[k], color=COLORS[name], lw=0.8, ls=":", alpha=0.7)
     ax.set_xlabel("t")
     ax.set_ylabel("mean fraction")
     ax.set_xlim(result.t[0], result.t[-1])
 
-    lam = result.lambda_mean
-    if show_omega0 and lam > 0:
-        T0 = 2 * np.pi * np.sqrt(3) / lam
+    w0 = result.omega0
+    if show_omega0 and w0 > 0:
+        T0 = 2 * np.pi / w0
         lo, hi = np.nanmin(result.fractions), np.nanmax(result.fractions)
         pad = 0.1 * max(hi - lo, 1e-4)
         y = hi + pad
@@ -239,7 +232,7 @@ def plot_fractions(result: SimResult, ax: Axes | None = None, show_omega0: bool 
         ax.annotate("", xy=(t0, y), xytext=(t0 + T0, y),
                     arrowprops={"arrowstyle": "|-|", "color": "k", "lw": 1.0, "shrinkA": 0, "shrinkB": 0})
         ax.text(t0 + T0 / 2, y + 0.3 * pad,
-                rf"$T_0 = 2\pi\sqrt{{3}}/\bar\lambda = {T0:.3g}$", ha="center", va="bottom", fontsize=9)
+                rf"$T_0 = 2\pi/\omega_0 = {T0:.3g}$", ha="center", va="bottom", fontsize=9)
         ax.set_ylim(lo - pad, hi + 3 * pad)
     ax.legend(loc="lower right", fontsize=9, ncol=3)
     return ax
@@ -251,54 +244,6 @@ def plot_fractions(result: SimResult, ax: Axes | None = None, show_omega0: bool 
 def _ffmpeg_path() -> str | None:
     configured = mpl.rcParams.get("animation.ffmpeg_path", "ffmpeg")
     return shutil.which(configured) or shutil.which("ffmpeg")
-
-
-def plot_lambda(result: SimResult, ax: Axes | None = None) -> Axes:
-    """Show the interaction-rate field λ(x, y) on the domain.
-
-    Every distinct value of λ is written onto its region, so piecewise-constant
-    fields (background, squares, disks, ...) can be read off directly. A
-    uniform field is labelled ``λ = value (uniform)``.
-
-    Parameters
-    ----------
-    result : SimResult
-        Simulation output.
-    ax : matplotlib.axes.Axes, optional
-        Target axes; a new figure is created if omitted.
-
-    Returns
-    -------
-    matplotlib.axes.Axes
-        The axes drawn into.
-    """
-    if ax is None:
-        _, ax = plt.subplots(figsize=(5, 4.5))
-    fig = ax.figure
-    L = result.L
-    field = np.where(result.mask, result.lambda_field, np.nan)
-    values = np.unique(np.round(field[result.mask], 6))
-    lo, hi = float(values.min()), float(values.max())
-    if hi == lo:
-        lo, hi = lo - 1.0, hi + 1.0
-    im = ax.imshow(np.ma.masked_invalid(field), cmap="viridis", vmin=lo, vmax=hi, **_imshow_kw(L))
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=r"$\lambda$")
-    if values.size <= 6:
-        X, Y = grid(result.Nx, L)
-        for v in values:
-            region = result.mask & np.isclose(result.lambda_field, v, atol=1e-6)
-            # Label at the region's most interior cell (farthest from its edge).
-            depth = ndimage.distance_transform_edt(np.pad(region, 1))[1:-1, 1:-1]
-            j, i = np.unravel_index(np.argmax(depth), depth.shape)
-            text = rf"$\lambda$ = {v:g}" + ("  (uniform)" if values.size == 1 else "")
-            ax.text(X[j, i], Y[j, i], text, ha="center", va="center", fontsize=9,
-                    bbox={"fc": "white", "alpha": 0.8, "ec": "none", "boxstyle": "round,pad=0.2"})
-    ax.set_title(r"interaction rate $\lambda(x,y)$")
-    return ax
-
-
-def _setup_lambda_axes(fig: Figure, ax: Axes, result: SimResult) -> None:
-    plot_lambda(result, ax)
 
 
 def _setup_series_axes(ax_frac: Axes, ax_var: Axes, result: SimResult) -> tuple[list, list]:
@@ -315,7 +260,8 @@ def _setup_series_axes(ax_frac: Axes, ax_var: Axes, result: SimResult) -> tuple[
     pad = 0.08 * max(hi - lo, 1e-6)
     ax_frac.set(xlim=(t[0], t_end), ylim=(lo - pad, hi + pad), xlabel="t", ylabel="mean fraction",
                 title="domain-averaged fractions")
-    ax_frac.axhline(1 / 3, color="0.6", lw=0.8, ls=":")
+    for k, name in enumerate(SPECIES):
+        ax_frac.axhline(result.fixed_point[k], color=COLORS[name], lw=0.8, ls=":", alpha=0.7)
     ax_frac.legend(fontsize=8, loc="upper right", ncol=3)
 
     pos = var[var > 0]
@@ -340,9 +286,9 @@ def _render_frames(
     if style == "surface":
         fig = Figure(figsize=(15, 9), dpi=dpi)
         canvas = FigureCanvasAgg(fig)
-        gs = fig.add_gridspec(2, 3, height_ratios=(1.25, 1))
-        ax_surf = [fig.add_subplot(gs[0, k], projection="3d") for k in range(3)]
-        ax_lam, ax_frac, ax_var = (fig.add_subplot(gs[1, k]) for k in range(3))
+        gs = fig.add_gridspec(2, 6, height_ratios=(1.25, 1))
+        ax_surf = [fig.add_subplot(gs[0, 2 * k: 2 * k + 2], projection="3d") for k in range(3)]
+        ax_frac, ax_var = fig.add_subplot(gs[1, 0:3]), fig.add_subplot(gs[1, 3:6])
         sl, X, Y = _surface_grid(result)
         zlim = _surface_zlim(result, frames)
         for ax, name in zip(ax_surf, SPECIES):
@@ -350,23 +296,22 @@ def _render_frames(
         stamp = fig.text(0.5, 0.99, "", ha="center", va="top", fontsize=13, animated=True)
         fig.text(0.5, 0.955, describe_parameters(result), ha="center", va="top", fontsize=10, color="0.25")
     elif style == "rgb":
-        fig = Figure(figsize=(10, 8.4), dpi=dpi)
+        fig = Figure(figsize=(16, 5.6), dpi=dpi)
         canvas = FigureCanvasAgg(fig)
-        (ax_img, ax_lam), (ax_frac, ax_var) = fig.subplots(2, 2)
+        ax_img, ax_frac, ax_var = fig.subplots(1, 3)
         im = ax_img.imshow(density_rgb(result.snapshots[frames[0]], contrast), animated=True, **_imshow_kw(L))
         ax_img.set_title("densities  (red = Scissors, green = Paper, blue = Rock)", fontsize=10)
         stamp = ax_img.text(0.02, 0.97, "", transform=ax_img.transAxes, va="top", fontsize=9, animated=True,
                             bbox={"fc": "white", "alpha": 0.7, "ec": "none"})
-        fig.suptitle(describe_parameters(result), fontsize=9, color="0.25")
+        fig.suptitle(describe_parameters(result), fontsize=10, color="0.25")
     else:
         raise ValueError("style must be 'surface' or 'rgb'")
 
-    _setup_lambda_axes(fig, ax_lam, result)
     lines_f, lines_v = _setup_series_axes(ax_frac, ax_var, result)
     if style == "surface":
-        fig.subplots_adjust(left=0.04, right=0.98, bottom=0.07, top=0.91, wspace=0.34, hspace=0.12)
+        fig.subplots_adjust(left=0.05, right=0.98, bottom=0.07, top=0.89, wspace=0.6, hspace=0.15)
     else:
-        fig.tight_layout(rect=(0, 0, 1, 0.97))
+        fig.tight_layout(rect=(0, 0, 1, 0.95))
 
     canvas.draw()  # static parts only: animated artists are skipped
     background = canvas.copy_from_bbox(fig.bbox)
@@ -410,10 +355,10 @@ def make_video(
 
     With ``style='surface'`` (default) each frame shows three 3-D surface
     plots of ``ρ_S``, ``ρ_R`` and ``ρ_P`` on a common z-scale, above the
-    static λ(x, y) field, the mean fractions up to the current time and the
-    spatial variance ``Var[ρ_i]`` over the domain. With ``style='rgb'`` the
-    three surfaces are replaced by one RGB density image (R = Scissors,
-    G = Paper, B = Rock) in a 2×2 layout. Static parts of the figure are
+    mean fractions up to the current time and the spatial variance
+    ``Var[ρ_i]`` over the domain. With ``style='rgb'`` the three surfaces
+    are replaced by one RGB density image (R = Scissors, G = Paper,
+    B = Rock). The model parameters are printed at the top of every frame. Static parts of the figure are
     drawn once; each frame only redraws the changing artists (blitting) on
     an off-screen Agg canvas.
 
