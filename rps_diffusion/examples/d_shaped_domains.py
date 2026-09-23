@@ -7,7 +7,7 @@ shape, including the boundaries of the holes.
 
 from __future__ import annotations
 
-from rps_diffusion import Domain, RPSSimulator, blobs
+from rps_diffusion import Domain, RPSSimulator, hills
 from rps_diffusion.examples._common import report_frequencies, save_outputs
 
 
@@ -25,7 +25,7 @@ def main() -> None:
     for name, label, dom in (("d_ring", "ring", ring), ("d_obstacles", "disk with holes and a notch", obstacles)):
         print(f"(d) {name}: {dom}")
         sim = RPSSimulator(rates, sigma=sigma, L=L, dt=0.02, domain=dom)
-        res = sim.run(blobs(Nx, L, n_blobs=8, seed=1), t_max=30.0, save_every=5)
+        res = sim.run(hills(Nx, L, width=0.1, amplitude=1.5), t_max=30.0, save_every=5)
         report_frequencies(res)
         save_outputs(res, name, f"(d) shaped domain with no-flux boundary: {label}")
 

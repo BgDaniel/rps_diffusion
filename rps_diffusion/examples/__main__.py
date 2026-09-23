@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-from rps_diffusion.examples import a_omega0, b_asymmetric_rates, c_stripe_fronts, d_shaped_domains
+from rps_diffusion.examples import (
+    a_omega0,
+    b_asymmetric_rates,
+    c_stripe_fronts,
+    d_shaped_domains,
+    e_square_large_cycles,
+    f_square_hills,
+)
 
 
 def main() -> None:
-    """Run scenarios (a) to (d) in sequence."""
-    for module in (a_omega0, b_asymmetric_rates, c_stripe_fronts, d_shaped_domains):
+    """Run scenarios (a) to (f) in sequence."""
+    for module in (a_omega0, b_asymmetric_rates, c_stripe_fronts, d_shaped_domains,
+                   e_square_large_cycles, f_square_hills):
         module.main()
 
 

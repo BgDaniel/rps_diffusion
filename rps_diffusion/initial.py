@@ -14,7 +14,7 @@ import numpy as np
 
 from .domain import grid
 
-__all__ = ["homogeneous", "random_perturbation", "stripes", "blobs", "concentrated", "normalise"]
+__all__ = ["homogeneous", "random_perturbation", "stripes", "blobs", "concentrated", "hills", "normalise"]
 
 S, R, P = 0, 1, 2
 
@@ -181,3 +181,46 @@ def concentrated(
     u = np.asarray(u0, dtype=float)
     rho[:, inside] = (u / u.sum())[:, None]
     return rho
+
+
+def hills(
+    Nx: int,
+    L: float = 1.0,
+    centres: tuple[tuple[float, float], tuple[float, float], tuple[float, float]] = (
+        (0.25, 0.3),
+        (0.75, 0.3),
+        (0.5, 0.75),
+    ),
+    width: float = 0.15,
+    amplitude: float = 1.0,
+    background: tuple[float, float, float] = (1 / 3, 1 / 3, 1 / 3),
+) -> np.ndarray:
+    """One smooth Gaussian hill per species on a uniform background (deterministic).
+
+    Parameters
+    ----------
+    Nx : int
+        Grid cells per axis.
+    L : float, default 1.0
+        Side length of the bounding square.
+    centres : tuple of three (x, y) pairs
+        Hill centres for S, R and P, in units of ``L``.
+    width : float, default 0.15
+        Hill standard deviation in units of ``L``.
+    amplitude : float, default 1.0
+        Height of each hill added to the background before normalising.
+    background : tuple of float, default (1/3, 1/3, 1/3)
+        Fractions far away from the hills.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(3, Nx, Nx)``.
+    """
+    X, Y = grid(Nx, L)
+    base = np.asarray(background, dtype=float)
+    rho = np.empty((3, Nx, Nx))
+    for k, (cx, cy) in enumerate(centres):
+        r2 = (X - cx * L) ** 2 + (Y - cy * L) ** 2
+        rho[k] = base[k] / base.sum() + amplitude * np.exp(-r2 / (2 * (width * L) ** 2))
+    return normalise(rho)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rps_diffusion import Domain, blobs, concentrated, homogeneous, random_perturbation, stripes
+from rps_diffusion import Domain, blobs, concentrated, hills, homogeneous, random_perturbation, stripes
 
 
 def test_domain_shapes() -> None:
@@ -41,6 +41,8 @@ def test_domain_disconnected_warns() -> None:
         concentrated(16),
         concentrated(16, background=(0.2, 0.3, 0.5)),
         random_perturbation(16, background=(0.5, 0.2, 0.3)),
+        hills(16),
+        hills(16, background=(0.2, 0.3, 0.5), amplitude=0.3),
     ],
 )
 def test_initial_conditions_are_simplex_valued(rho: np.ndarray) -> None:

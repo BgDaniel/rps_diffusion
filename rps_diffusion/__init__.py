@@ -12,7 +12,7 @@ no-flux boundary conditions.
 
 from .analysis import dominant_frequencies, frequency_spectrum, plot_spectrum
 from .domain import Domain
-from .initial import blobs, concentrated, homogeneous, random_perturbation, stripes
+from .initial import blobs, concentrated, hills, homogeneous, random_perturbation, stripes
 from .simulator import RPSSimulator, SimResult, fixed_point, omega0
 from .visualize import describe_parameters, make_video, plot_fractions, plot_snapshot, plot_surfaces
 
@@ -27,6 +27,7 @@ __all__ = [
     "stripes",
     "blobs",
     "concentrated",
+    "hills",
     "make_video",
     "plot_fractions",
     "plot_snapshot",

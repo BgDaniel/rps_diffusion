@@ -133,7 +133,7 @@ the domain only.
 poetry install && poetry run python -m rps_diffusion.examples
 ```
 
-This runs scenarios (a)–(d) in about a minute and writes one summary figure
+This runs scenarios (a)–(f) in about a minute and a half and writes one summary figure
 and one video per scenario to `examples/output/`. To run a single scenario,
 use for example `poetry run python -m rps_diffusion.examples.b_asymmetric_rates`.
 Videos are MP4 when `ffmpeg` is on the `PATH` and GIF otherwise. MP4 files
@@ -166,13 +166,33 @@ against the predicted 0.1701. The time-averaged fractions
 ![c](examples/output/c_stripe_fronts.gif)
 ![c plot](examples/output/c_stripe_fronts.png)
 
-**(d) Shaped domains, rates (2, 3, 4).** A ring, and a disk with two holes
-and a notch. No flux crosses any boundary.
+**(d) Shaped domains, rates (2, 3, 4), one hill per species.** A ring, and a
+disk with two holes and a notch. No flux crosses any boundary.
 
 ![d ring](examples/output/d_ring.gif)
 ![d ring plot](examples/output/d_ring.png)
 ![d obstacles](examples/output/d_obstacles.gif)
 ![d obstacles plot](examples/output/d_obstacles.png)
+
+**(e) Square, far from equilibrium: large oscillations.** The run starts
+with Scissors dominating, (0.80, 0.12, 0.08), plus a gentle tilt across the
+square. The mean fractions swing between about 0.02 and 0.8. Because the
+dynamics are nonlinear, the period is about 20 % longer than T₀.
+
+![e](examples/output/e_square_large_cycles.gif)
+![e plot](examples/output/e_square_large_cycles.png)
+
+**(f) Square, non-flat start.** One smooth hill per species (`hills()`): S
+at the lower left, R at the lower right, P at the top. The hills turn into
+rotating fronts that reflect off the no-flux walls.
+
+![f](examples/output/f_square_hills.gif)
+![f plot](examples/output/f_square_hills.png)
+
+All initial conditions in the examples are deterministic, and the PDE
+itself has no random terms: σ enters only through the diffusion coefficient
+D = σ²/2. `random_perturbation` and `blobs` are available if you want
+random initial states.
 
 ## Numerics
 
@@ -219,6 +239,6 @@ rps_diffusion/
 │   ├── simulator.py     # RPSSimulator, SimResult, fixed_point, omega0
 │   ├── visualize.py     # make_video, plot_fractions, plot_surfaces, ...
 │   ├── analysis.py      # frequency_spectrum, dominant_frequencies
-│   └── examples/        # scenarios (a)–(d), python -m rps_diffusion.examples
+│   └── examples/        # scenarios (a)–(f), python -m rps_diffusion.examples
 └── tests/
 ```
