@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Literal
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -14,14 +15,28 @@ from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from PIL import Image
+from scipy import ndimage
 
+from .domain import grid
 from .simulator import SPECIES, SimResult
 
-__all__ = ["COLORS", "density_rgb", "make_video", "plot_fractions", "plot_snapshot"]
+__all__ = [
+    "COLORS",
+    "density_rgb",
+    "describe_parameters",
+    "make_video",
+    "plot_fractions",
+    "plot_lambda",
+    "plot_snapshot",
+    "plot_surfaces",
+]
 
 #: Line colours matching the RGB image (R = Scissors, G = Paper, B = Rock).
 COLORS: dict[str, str] = {"S": "#d62728", "R": "#1f5fd6", "P": "#2ca02c"}
+_NAMES: dict[str, str] = {"S": "Scissors", "R": "Rock", "P": "Paper"}
+_CMAPS: dict[str, str] = {"S": "Reds", "R": "Blues", "P": "Greens"}
 _OUTSIDE = np.array([0.93, 0.93, 0.93])
+_SURFACE_CELLS = 48  # surfaces are drawn with at most this many cells per axis
 
 
 def density_rgb(rho: np.ndarray, contrast: float = 1.0) -> np.ndarray:
@@ -79,6 +94,114 @@ def plot_snapshot(result: SimResult, index: int = -1, ax: Axes | None = None, co
     return ax
 
 
+# ---------------------------------------------------------------------------
+# 3-D surfaces
+# ---------------------------------------------------------------------------
+def _surface_grid(result: SimResult) -> tuple[slice, np.ndarray, np.ndarray]:
+    step = max(1, int(np.ceil(result.Nx / _SURFACE_CELLS)))
+    sl = slice(None, None, step)
+    X, Y = grid(result.Nx, result.L)
+    return sl, X[sl, sl], Y[sl, sl]
+
+
+def _surface_zlim(result: SimResult, frames: list[int]) -> tuple[float, float]:
+    lo = min(float(np.nanmin(result.snapshots[i])) for i in frames)
+    hi = max(float(np.nanmax(result.snapshots[i])) for i in frames)
+    pad = 0.05 * max(hi - lo, 1e-6)
+    return lo - pad, hi + pad
+
+
+def _setup_surface_axes(ax: Axes, name: str, L: float, zlim: tuple[float, float]) -> None:
+    ax.set(xlim=(0, L), ylim=(0, L), zlim=zlim)
+    ax.set_xlabel("x", fontsize=8, labelpad=-6)
+    ax.set_ylabel("y", fontsize=8, labelpad=-6)
+    ax.set_title(rf"$\rho_{name}$  ({_NAMES[name]})", fontsize=11, color=COLORS[name])
+    ax.tick_params(labelsize=7, pad=-2)
+    ax.view_init(elev=32, azim=-58)
+
+
+def _draw_surface(ax: Axes, X: np.ndarray, Y: np.ndarray, Z: np.ndarray, name: str,
+                  zlim: tuple[float, float], animated: bool = False):
+    span = zlim[1] - zlim[0]
+    # Masked (outside-domain) cells produce no polygons.
+    return ax.plot_surface(X, Y, np.ma.masked_invalid(Z), cmap=_CMAPS[name], vmin=zlim[0] - 0.3 * span,
+                           vmax=zlim[1], linewidth=0, antialiased=False, rstride=1, cstride=1,
+                           animated=animated)
+
+
+def plot_surfaces(
+    result: SimResult,
+    index: int = -1,
+    fig: Figure | None = None,
+    axes: list[Axes] | None = None,
+) -> Figure:
+    """Show one snapshot as three 3-D surface plots, one per species.
+
+    Parameters
+    ----------
+    result : SimResult
+        Simulation output.
+    index : int, default -1
+        Snapshot index.
+    fig : matplotlib.figure.Figure, optional
+        Target figure; a new one is created if omitted.
+    axes : list of Axes, optional
+        Three existing 3-D axes to draw into (``projection='3d'``). If
+        omitted, a row of three is added to ``fig``.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The figure drawn into.
+    """
+    if axes is None:
+        if fig is None:
+            fig = plt.figure(figsize=(15, 4.8))
+        axes = [fig.add_subplot(1, 3, k + 1, projection="3d") for k in range(3)]
+        fig.suptitle(f"t = {result.t[index]:.2f}    ·    {describe_parameters(result)}", fontsize=10)
+    fig = axes[0].figure
+    i = index % len(result.t)
+    sl, X, Y = _surface_grid(result)
+    zlim = _surface_zlim(result, [i])
+    for ax, k, name in zip(axes, range(3), SPECIES):
+        _setup_surface_axes(ax, name, result.L, zlim)
+        _draw_surface(ax, X, Y, result.snapshots[i][k][sl, sl], name, zlim)
+    return fig
+
+
+def describe_parameters(result: SimResult) -> str:
+    """One-line summary of the model parameters, for figure titles.
+
+    Parameters
+    ----------
+    result : SimResult
+        Simulation output.
+
+    Returns
+    -------
+    str
+        For example ``"σ = 0.02  ·  λ ∈ {0, 1.5, 4.5}, λ̄ = 0.63  ·  L = 1, Nx = 64,
+        dt = 0.02  ·  full square"`` (with matplotlib mathtext symbols).
+    """
+    lam = result.lambda_field[result.mask]
+    values = np.unique(np.round(lam, 6))
+    if values.size == 1:
+        lam_s = rf"$\lambda$ = {values[0]:g}"
+    else:
+        spread = ("{" + ", ".join(f"{v:g}" for v in values) + "}") if values.size <= 4 \
+            else f"[{values.min():g}, {values.max():g}]"
+        lam_s = rf"$\lambda \in$ {spread},  $\bar\lambda$ = {lam.mean():.3g}"
+    if result.mask.all():
+        dom = "full square"
+    else:
+        dom = f"shaped domain ({result.mask.mean():.0%} of the box)"
+    return (rf"$\sigma$ = {result.sigma:g}    ·    {lam_s}    ·    "
+            f"L = {result.L:g}, Nx = {result.Nx}, dt = {result.dt:g}    ·    {dom}")
+
+
+# ---------------------------------------------------------------------------
+# Time series
+# ---------------------------------------------------------------------------
 def plot_fractions(result: SimResult, ax: Axes | None = None, show_omega0: bool = True) -> Axes:
     """Plot the domain-averaged fractions ``u_S(t)``, ``u_R(t)``, ``u_P(t)``.
 
@@ -122,31 +245,67 @@ def plot_fractions(result: SimResult, ax: Axes | None = None, show_omega0: bool 
     return ax
 
 
+# ---------------------------------------------------------------------------
+# Video
+# ---------------------------------------------------------------------------
 def _ffmpeg_path() -> str | None:
     configured = mpl.rcParams.get("animation.ffmpeg_path", "ffmpeg")
     return shutil.which(configured) or shutil.which("ffmpeg")
 
 
-def _render_frames(result: SimResult, frames: list[int], contrast: float, dpi: int) -> Iterator[np.ndarray]:
-    """Yield RGB frames of the 2×2 panel, redrawing only the animated artists."""
-    t, fr, var, L = result.t, result.fractions, result.variances, result.L
-    fig = Figure(figsize=(10, 8.4), dpi=dpi)
-    canvas = FigureCanvasAgg(fig)
-    (ax_img, ax_lam), (ax_frac, ax_var) = fig.subplots(2, 2)
+def plot_lambda(result: SimResult, ax: Axes | None = None) -> Axes:
+    """Show the interaction-rate field λ(x, y) on the domain.
 
-    im = ax_img.imshow(density_rgb(result.snapshots[frames[0]], contrast), animated=True, **_imshow_kw(L))
-    ax_img.set_title("densities  (red = Scissors, green = Paper, blue = Rock)", fontsize=10)
-    stamp = ax_img.text(0.02, 0.97, "", transform=ax_img.transAxes, va="top", fontsize=9, animated=True,
-                        bbox={"fc": "white", "alpha": 0.7, "ec": "none"})
+    Every distinct value of λ is written onto its region, so piecewise-constant
+    fields (background, squares, disks, ...) can be read off directly. A
+    uniform field is labelled ``λ = value (uniform)``.
 
-    lam = np.ma.masked_where(~result.mask, result.lambda_field)
-    lim = ax_lam.imshow(lam, cmap="viridis", **_imshow_kw(L))
-    fig.colorbar(lim, ax=ax_lam, fraction=0.046, pad=0.04, label=r"$\lambda$")
-    ax_lam.set_title(r"interaction rate $\lambda(x,y)$")
+    Parameters
+    ----------
+    result : SimResult
+        Simulation output.
+    ax : matplotlib.axes.Axes, optional
+        Target axes; a new figure is created if omitted.
 
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axes drawn into.
+    """
+    if ax is None:
+        _, ax = plt.subplots(figsize=(5, 4.5))
+    fig = ax.figure
+    L = result.L
+    field = np.where(result.mask, result.lambda_field, np.nan)
+    values = np.unique(np.round(field[result.mask], 6))
+    lo, hi = float(values.min()), float(values.max())
+    if hi == lo:
+        lo, hi = lo - 1.0, hi + 1.0
+    im = ax.imshow(np.ma.masked_invalid(field), cmap="viridis", vmin=lo, vmax=hi, **_imshow_kw(L))
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label=r"$\lambda$")
+    if values.size <= 6:
+        X, Y = grid(result.Nx, L)
+        for v in values:
+            region = result.mask & np.isclose(result.lambda_field, v, atol=1e-6)
+            # Label at the region's most interior cell (farthest from its edge).
+            depth = ndimage.distance_transform_edt(np.pad(region, 1))[1:-1, 1:-1]
+            j, i = np.unravel_index(np.argmax(depth), depth.shape)
+            text = rf"$\lambda$ = {v:g}" + ("  (uniform)" if values.size == 1 else "")
+            ax.text(X[j, i], Y[j, i], text, ha="center", va="center", fontsize=9,
+                    bbox={"fc": "white", "alpha": 0.8, "ec": "none", "boxstyle": "round,pad=0.2"})
+    ax.set_title(r"interaction rate $\lambda(x,y)$")
+    return ax
+
+
+def _setup_lambda_axes(fig: Figure, ax: Axes, result: SimResult) -> None:
+    plot_lambda(result, ax)
+
+
+def _setup_series_axes(ax_frac: Axes, ax_var: Axes, result: SimResult) -> tuple[list, list]:
+    t, fr, var = result.t, result.fractions, result.variances
     t_end = t[-1] if t[-1] > t[0] else t[0] + 1.0
     lines_f, lines_v = [], []
-    for k, name in enumerate(SPECIES):
+    for name in SPECIES:
         (lf,) = ax_frac.plot([], [], color=COLORS[name], lw=1.3, label=f"$u_{name}$", animated=True)
         (lv,) = ax_var.plot([], [], color=COLORS[name], lw=1.3, label=rf"Var $\rho_{name}$", animated=True)
         lines_f.append(lf)
@@ -169,23 +328,71 @@ def _render_frames(result: SimResult, frames: list[int], contrast: float, dpi: i
         ax_var.set_ylim(vlo - vpad, vhi + vpad)
     ax_var.set(xlim=(t[0], t_end), xlabel="t", ylabel="spatial variance", title="spatial variance")
     ax_var.legend(fontsize=8, loc="upper right", ncol=3)
-    fig.tight_layout()
+    return lines_f, lines_v
+
+
+def _render_frames(
+    result: SimResult, frames: list[int], contrast: float, dpi: int, style: str
+) -> Iterator[np.ndarray]:
+    """Yield RGB video frames, redrawing only the animated artists (blitting)."""
+    t, fr, var, L = result.t, result.fractions, result.variances, result.L
+
+    if style == "surface":
+        fig = Figure(figsize=(15, 9), dpi=dpi)
+        canvas = FigureCanvasAgg(fig)
+        gs = fig.add_gridspec(2, 3, height_ratios=(1.25, 1))
+        ax_surf = [fig.add_subplot(gs[0, k], projection="3d") for k in range(3)]
+        ax_lam, ax_frac, ax_var = (fig.add_subplot(gs[1, k]) for k in range(3))
+        sl, X, Y = _surface_grid(result)
+        zlim = _surface_zlim(result, frames)
+        for ax, name in zip(ax_surf, SPECIES):
+            _setup_surface_axes(ax, name, L, zlim)
+        stamp = fig.text(0.5, 0.99, "", ha="center", va="top", fontsize=13, animated=True)
+        fig.text(0.5, 0.955, describe_parameters(result), ha="center", va="top", fontsize=10, color="0.25")
+    elif style == "rgb":
+        fig = Figure(figsize=(10, 8.4), dpi=dpi)
+        canvas = FigureCanvasAgg(fig)
+        (ax_img, ax_lam), (ax_frac, ax_var) = fig.subplots(2, 2)
+        im = ax_img.imshow(density_rgb(result.snapshots[frames[0]], contrast), animated=True, **_imshow_kw(L))
+        ax_img.set_title("densities  (red = Scissors, green = Paper, blue = Rock)", fontsize=10)
+        stamp = ax_img.text(0.02, 0.97, "", transform=ax_img.transAxes, va="top", fontsize=9, animated=True,
+                            bbox={"fc": "white", "alpha": 0.7, "ec": "none"})
+        fig.suptitle(describe_parameters(result), fontsize=9, color="0.25")
+    else:
+        raise ValueError("style must be 'surface' or 'rgb'")
+
+    _setup_lambda_axes(fig, ax_lam, result)
+    lines_f, lines_v = _setup_series_axes(ax_frac, ax_var, result)
+    if style == "surface":
+        fig.subplots_adjust(left=0.04, right=0.98, bottom=0.07, top=0.91, wspace=0.34, hspace=0.12)
+    else:
+        fig.tight_layout(rect=(0, 0, 1, 0.97))
 
     canvas.draw()  # static parts only: animated artists are skipped
     background = canvas.copy_from_bbox(fig.bbox)
+    surfaces: list = []
     for i in frames:
         canvas.restore_region(background)
-        im.set_data(density_rgb(result.snapshots[i], contrast))
         stamp.set_text(f"t = {t[i]:.2f}")
+        if style == "surface":
+            for surf in surfaces:
+                surf.remove()
+            surfaces = []
+            for ax, k, name in zip(ax_surf, range(3), SPECIES):
+                surf = _draw_surface(ax, X, Y, result.snapshots[i][k][sl, sl], name, zlim, animated=True)
+                surf.do_3d_projection()  # uses the view matrix from the initial full draw
+                ax.draw_artist(surf)
+                surfaces.append(surf)
+            fig.draw_artist(stamp)
+        else:
+            im.set_data(density_rgb(result.snapshots[i], contrast))
+            ax_img.draw_artist(im)
+            ax_img.draw_artist(stamp)
         for k in range(3):
             lines_f[k].set_data(t[: i + 1], fr[: i + 1, k])
             lines_v[k].set_data(t[: i + 1], var[: i + 1, k])
-        ax_img.draw_artist(im)
-        ax_img.draw_artist(stamp)
-        for line in lines_f:
-            ax_frac.draw_artist(line)
-        for line in lines_v:
-            ax_var.draw_artist(line)
+            ax_frac.draw_artist(lines_f[k])
+            ax_var.draw_artist(lines_v[k])
         yield np.asarray(canvas.buffer_rgba())[..., :3].copy()
 
 
@@ -197,14 +404,18 @@ def make_video(
     contrast: float = 1.0,
     dpi: int = 80,
     max_frames: int | None = 300,
+    style: Literal["surface", "rgb"] = "surface",
 ) -> Path:
     """Render the simulation as an MP4 (GIF if ffmpeg is unavailable).
 
-    Each frame has four panels: the RGB density image (R = Scissors,
-    G = Paper, B = Rock), the static λ(x, y) field, the mean fractions up to
-    the current time, and the spatial variance ``Var[ρ_i]`` over the domain.
-    The static parts of the figure are drawn once; each frame only redraws
-    the changing artists (blitting) on an off-screen Agg canvas.
+    With ``style='surface'`` (default) each frame shows three 3-D surface
+    plots of ``ρ_S``, ``ρ_R`` and ``ρ_P`` on a common z-scale, above the
+    static λ(x, y) field, the mean fractions up to the current time and the
+    spatial variance ``Var[ρ_i]`` over the domain. With ``style='rgb'`` the
+    three surfaces are replaced by one RGB density image (R = Scissors,
+    G = Paper, B = Rock) in a 2×2 layout. Static parts of the figure are
+    drawn once; each frame only redraws the changing artists (blitting) on
+    an off-screen Agg canvas.
 
     Parameters
     ----------
@@ -217,12 +428,15 @@ def make_video(
     stride : int, default 1
         Use every ``stride``-th snapshot as a frame.
     contrast : float, default 1.0
-        Contrast of the density image (see :func:`density_rgb`).
+        Contrast of the RGB density image (``style='rgb'`` only; see
+        :func:`density_rgb`).
     dpi : int, default 80
-        Resolution of the rendered frames (the figure is 10 × 8.4 inches).
+        Resolution of the rendered frames.
     max_frames : int, optional
         Increase ``stride`` so that at most this many frames are rendered.
         ``None`` renders every ``stride``-th snapshot.
+    style : {'surface', 'rgb'}, default 'surface'
+        How the densities are shown.
 
     Returns
     -------
@@ -238,7 +452,7 @@ def make_video(
     frames = list(range(0, n, stride))
     if frames[-1] != n - 1:
         frames.append(n - 1)
-    rendered = _render_frames(result, frames, contrast, dpi)
+    rendered = _render_frames(result, frames, contrast, dpi, style)
 
     ffmpeg = _ffmpeg_path()
     if ffmpeg is not None:

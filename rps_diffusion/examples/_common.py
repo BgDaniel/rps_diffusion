@@ -9,23 +9,28 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
 
 from rps_diffusion.analysis import dominant_frequencies, frequency_spectrum  # noqa: E402
 from rps_diffusion.simulator import SimResult  # noqa: E402
-from rps_diffusion.visualize import make_video, plot_fractions  # noqa: E402
+from rps_diffusion.visualize import (  # noqa: E402
+    describe_parameters,
+    make_video,
+    plot_fractions,
+    plot_lambda,
+    plot_surfaces,
+)
 
 OUTPUT_DIR = Path("examples") / "output"
 
 
-def save_outputs(
-    result: SimResult,
-    name: str,
-    out_dir: Path = OUTPUT_DIR,
-    stride: int = 1,
-    contrast: float = 1.0,
-    spectrum: bool = True,
-) -> None:
-    """Write the video, the fraction plot and (optionally) the spectrum.
+def save_outputs(result: SimResult, name: str, title: str, out_dir: Path = OUTPUT_DIR) -> None:
+    """Write the summary figure and the video for one scenario.
+
+    Every scenario uses the same summary layout. The top row shows the mean
+    fractions (with the T₀ bracket), the power spectrum with f₀ and its
+    overtones, and the λ(x, y) field. The bottom row shows the three density
+    surfaces at the final time. The title carries all model parameters.
 
     Parameters
     ----------
@@ -33,43 +38,52 @@ def save_outputs(
         Simulation output.
     name : str
         File name stem.
+    title : str
+        Scenario title shown above the parameter line.
     out_dir : Path
         Output directory.
-    stride : int
-        Snapshot stride for the video.
-    contrast : float
-        Contrast of the density image.
-    spectrum : bool
-        Also plot the power spectrum next to the fractions.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
-    ncols = 2 if spectrum else 1
-    fig, axes = plt.subplots(1, ncols, figsize=(7 * ncols, 4), squeeze=False)
-    plot_fractions(result, ax=axes[0, 0])
-    axes[0, 0].set_title("domain-averaged fractions")
-    if spectrum:
-        frequency_spectrum(result, 0, ax=axes[0, 1])
-        axes[0, 1].set_title("power spectrum of $u_S$")
-    fig.tight_layout()
+    fig = plt.figure(figsize=(16, 10))
+    gs = fig.add_gridspec(2, 3, height_ratios=(1, 1.15))
+    ax_frac = fig.add_subplot(gs[0, 0])
+    ax_spec = fig.add_subplot(gs[0, 1])
+    ax_lam = fig.add_subplot(gs[0, 2])
+    ax_surf = [fig.add_subplot(gs[1, k], projection="3d") for k in range(3)]
+
+    plot_fractions(result, ax=ax_frac)
+    ax_frac.set_title("domain-averaged fractions")
+    frequency_spectrum(result, 0, ax=ax_spec)
+    ax_spec.set_title("power spectrum of $u_S$")
+    plot_lambda(result, ax=ax_lam)
+    plot_surfaces(result, -1, axes=ax_surf)
+    ax_surf[1].text2D(0.5, 1.12, f"densities at final time t = {result.t[-1]:g}",
+                      transform=ax_surf[1].transAxes, ha="center", fontsize=11)
+
+    fig.suptitle(f"{title}\n{describe_parameters(result)}", fontsize=12)
+    fig.subplots_adjust(left=0.05, right=0.97, bottom=0.04, top=0.9, wspace=0.3, hspace=0.25)
     plot_path = out_dir / f"{name}.png"
-    fig.savefig(plot_path, dpi=120)
+    fig.savefig(plot_path, dpi=100)
     plt.close(fig)
-    video_path = make_video(result, out_dir / f"{name}.mp4", stride=stride, contrast=contrast)
+    video_path = make_video(result, out_dir / f"{name}.mp4", max_frames=150)
     print(f"  plot  -> {plot_path}\n  video -> {video_path}")
 
 
-def report_frequencies(result: SimResult, expected: dict[str, float], n: int = 3) -> None:
+def report_frequencies(result: SimResult, expected: dict[str, float] | None = None, n: int = 3) -> None:
     """Print the measured spectral peaks next to the predicted frequencies.
 
     Parameters
     ----------
     result : SimResult
         Simulation output.
-    expected : dict of str to float
-        Label -> predicted frequency (cycles per unit time).
+    expected : dict of str to float, optional
+        Label -> predicted frequency (cycles per unit time). Defaults to
+        ``f0 = λ̄ / (2π√3)`` of the domain-averaged rate.
     n : int
         Number of peaks to report.
     """
+    if expected is None:
+        expected = {"f0(mean)": result.lambda_mean / np.sqrt(3) / (2 * np.pi)}
     found = dominant_frequencies(result, n=n)
     print("  measured peaks f   :", ", ".join(f"{f:.4f}" for f in found))
     for label, f in expected.items():

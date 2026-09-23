@@ -23,7 +23,7 @@ def main() -> None:
     sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.02)
     res = sim.run(concentrated(Nx, L, u0=(0.40, 0.30, 0.30)), t_max=60.0, save_every=5)
     report_frequencies(res, {"f0": lam / np.sqrt(3) / (2 * np.pi)}, n=1)
-    save_outputs(res, "a_omega0", contrast=6.0)
+    save_outputs(res, "a_omega0", "(a) homogeneous lambda, concentrated IC: mean fractions oscillate at omega0 = lambda/sqrt(3)")
 
 
 if __name__ == "__main__":

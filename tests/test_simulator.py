@@ -87,11 +87,12 @@ def test_heun_preserves_neutral_cycle_better_than_euler() -> None:
     assert drift["heun"] < 0.05 * drift["euler"]
 
 
-def test_make_video_gif_fallback(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("style", ["surface", "rgb"])
+def test_make_video_gif_fallback(tmp_path, monkeypatch, style: str) -> None:
     import rps_diffusion.visualize as vis
 
     monkeypatch.setattr(vis, "_ffmpeg_path", lambda: None)
     sim = RPSSimulator(np.full((24, 24), 2.0), sigma=0.05, dt=0.01, domain=Domain.disk(24))
     res = sim.run(blobs(24), 1.0, save_every=10, progress=False)
-    out = vis.make_video(res, tmp_path / "v.mp4", max_frames=5)
+    out = vis.make_video(res, tmp_path / "v.mp4", max_frames=5, style=style)
     assert out.suffix == ".gif" and out.stat().st_size > 0

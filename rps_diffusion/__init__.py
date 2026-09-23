@@ -9,7 +9,7 @@ from .analysis import dominant_frequencies, frequency_spectrum, plot_spectrum
 from .domain import Domain, LambdaField
 from .initial import blobs, concentrated, homogeneous, random_perturbation, stripes
 from .simulator import RPSSimulator, SimResult
-from .visualize import make_video, plot_fractions, plot_snapshot
+from .visualize import make_video, plot_fractions, plot_snapshot, plot_surfaces
 
 __all__ = [
     "Domain",
@@ -24,6 +24,7 @@ __all__ = [
     "make_video",
     "plot_fractions",
     "plot_snapshot",
+    "plot_surfaces",
     "frequency_spectrum",
     "dominant_frequencies",
     "plot_spectrum",

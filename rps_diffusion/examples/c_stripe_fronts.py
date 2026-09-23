@@ -9,7 +9,7 @@ front that moves at a speed of order √(Dλ), with thickness of order
 from __future__ import annotations
 
 from rps_diffusion import LambdaField, RPSSimulator, stripes
-from rps_diffusion.examples._common import save_outputs
+from rps_diffusion.examples._common import report_frequencies, save_outputs
 
 
 def main() -> None:
@@ -19,7 +19,8 @@ def main() -> None:
     field = LambdaField(Nx, L).add_background(lam).build()
     sim = RPSSimulator(field, sigma=sigma, L=L, dt=0.02)
     res = sim.run(stripes(Nx, axis="x"), t_max=30.0, save_every=5)
-    save_outputs(res, "c_stripe_fronts", spectrum=False)
+    report_frequencies(res)
+    save_outputs(res, "c_stripe_fronts", "(c) stripe IC with small sigma: travelling invasion fronts")
 
 
 if __name__ == "__main__":
