@@ -9,7 +9,7 @@ from scipy.signal import find_peaks
 
 from .simulator import SPECIES, SimResult
 
-__all__ = ["frequency_spectrum", "dominant_frequencies", "plot_spectrum"]
+__all__ = ["frequency_spectrum", "dominant_frequencies", "plot_spectrum", "winding_number"]
 
 
 def _sample_spacing(result: SimResult) -> float:
@@ -31,7 +31,7 @@ def frequency_spectrum(
 
     The series is de-meaned and Hann-windowed before the FFT. Frequencies are
     ordinary frequencies (cycles per unit time); the linearised prediction is
-    ``f₀ = ω₀ / 2π = λ_mean / (2π√3)``.
+    ``f₀ = ω₀ / 2π`` with ``ω₀ = √(λ_S λ_R λ_P / Σλ)``.
 
     Parameters
     ----------
@@ -73,7 +73,7 @@ def _draw_spectrum(ax: Axes, freqs: np.ndarray, power: np.ndarray, result: SimRe
                            label=r"$f_0=\omega_0/2\pi$" if k == 1 else f"{k}$f_0$")
     ax.set_xlabel("frequency  [1 / time]")
     ax.set_ylabel("power")
-    # Show 6 f0 or 1.5x the strongest peaks, whichever is wider (λ may vary in space).
+    # Show 6 f0 or 1.5x the strongest peaks, whichever is wider (nonlinear runs peak elsewhere).
     peaks, _ = find_peaks(power[1:])
     top = freqs[peaks[np.argsort(power[peaks + 1])[-3:]] + 1] if peaks.size else np.array([0.0])
     ax.set_xlim(0, min(freqs[-1], max(6 * f0, 1.5 * top.max())))
@@ -149,3 +149,50 @@ def dominant_frequencies(
         else:
             out.append(float(freqs[p]))
     return out
+
+
+def winding_number(
+    result: SimResult,
+    index: int,
+    centre: tuple[float, float],
+    radius: float,
+    n_points: int = 720,
+) -> float:
+    """Winding number of the reaction phase along a circle.
+
+    Each cell's deviation from the fixed point, ``ρ − ρ*``, is mapped to the
+    complex number ``z = d_S + d_R e^{2πi/3} + d_P e^{4πi/3}``. Its argument
+    is the phase of the local S → R → P cycle. The function returns how many
+    times this phase winds around 0 along the circle.
+
+    Parameters
+    ----------
+    result : SimResult
+        Simulation output.
+    index : int
+        Snapshot index.
+    centre : tuple of float
+        Circle centre in absolute coordinates.
+    radius : float
+        Circle radius; the whole circle should lie inside the domain.
+    n_points : int, default 720
+        Sampling points along the circle.
+
+    Returns
+    -------
+    float
+        The winding number (close to an integer when the phase is well
+        defined everywhere on the circle).
+    """
+    th = np.linspace(0.0, 2 * np.pi, n_points, endpoint=False)
+    x = centre[0] + radius * np.cos(th)
+    y = centre[1] + radius * np.sin(th)
+    dx = result.L / result.Nx
+    i = np.clip((x / dx).astype(int), 0, result.Nx - 1)
+    j = np.clip((y / dx).astype(int), 0, result.Nx - 1)
+    d = result.snapshots[index][:, j, i] - np.asarray(result.fixed_point)[:, None]
+    if np.isnan(d).any():
+        raise ValueError("the circle leaves the domain")
+    z = d[0] + d[1] * np.exp(2j * np.pi / 3) + d[2] * np.exp(4j * np.pi / 3)
+    dphi = np.angle(np.roll(z, -1) / z)  # phase increments in (-π, π]
+    return float(dphi.sum() / (2 * np.pi))

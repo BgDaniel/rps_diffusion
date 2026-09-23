@@ -81,31 +81,42 @@ poetry install
 ## Usage
 
 ```python
-from rps_diffusion import (Domain, RPSSimulator, concentrated, fixed_point, omega0,
-                           stripes, make_video, plot_fractions, dominant_frequencies)
+from rps_diffusion import (Domain, RPSSimulator, concentrated, fixed_point, hills, omega0,
+                           winding, make_video, plot_fractions, dominant_frequencies, winding_number)
 
-Nx, L = 64, 1.0
+Nx, L = 96, 1.0
 
-# (a) equal rates + concentrated IC  ->  observe omega0 = lambda / sqrt(3)
-res = RPSSimulator(2.0, sigma=0.05, L=L, dt=0.02, Nx=Nx).run(concentrated(Nx, L), t_max=60, save_every=5)
+# equal rates + small bump  ->  mean fractions oscillate at omega0 = lambda / sqrt(3)
+res = RPSSimulator(2.0, sigma=0.05, dt=0.02, Nx=Nx).run(concentrated(Nx, L), t_max=60, save_every=5)
 plot_fractions(res)                  # dotted lines: rho*, bracket: T0 = 2 pi / omega0
 print(dominant_frequencies(res, n=1), omega0(2.0) / (2 * 3.14159))
 
-# (b) three different rates  ->  shifted fixed point, omega0 = sqrt(lS lR lP / sum)
-rates = (1.0, 2.0, 4.0)              # (lambda_S, lambda_R, lambda_P)
-rs = fixed_point(rates)              # (0.571, 0.143, 0.286)
-rho0 = concentrated(Nx, L, radius=0.25, u0=(rs[0] + 0.06, rs[1] - 0.03, rs[2] - 0.03), background=rs)
-res = RPSSimulator(rates, sigma=0.05, dt=0.02, Nx=Nx).run(rho0, t_max=80, save_every=5)
+# three different rates (lambda_S, lambda_R, lambda_P)  ->  shifted fixed point
+rates = (2.0, 3.0, 4.0)
+print(fixed_point(rates), omega0(rates))     # (0.444, 0.222, 0.333), 1.63
 
-# (c) stripe IC with small sigma  ->  travelling invasion fronts
-res = RPSSimulator(5.0, sigma=0.03, dt=0.02, Nx=128).run(stripes(128), t_max=30, save_every=5)
-make_video(res, "fronts.mp4")        # 3-D surfaces of rho_S, rho_R, rho_P; .gif without ffmpeg
-
-# (d) any domain shape: no-flux boundaries hold on the boundary of the mask
-dom = Domain.disk(Nx, L).cut_disk(0.5, 0.5, 0.15)          # disk with a hole
-dom = Domain(Nx, L, full=False).add_polygon([(0.1, 0.1), (0.9, 0.2), (0.5, 0.9)])
-res = RPSSimulator((2.0, 3.0, 4.0), sigma=0.03, dt=0.02, domain=dom).run(concentrated(Nx, L), t_max=40)
+# any domain shape, deterministic non-flat start
+ring = Domain.annulus(Nx, L, inner_fraction=0.5)
+res = RPSSimulator(rates, sigma=0.02, dt=0.01, domain=ring).run(
+    winding(Nx, L, background=fixed_point(rates)), t_max=40)
+print(winding_number(res, -1, centre=(0.5, 0.5), radius=0.37))   # stays 1
+make_video(res, "ring.mp4")          # 3-D surfaces of rho_S, rho_R, rho_P; .gif without ffmpeg
 ```
+
+Initial conditions (`rps_diffusion.initial`) are all deterministic apart
+from the explicitly random ones:
+
+| factory | shape |
+|---|---|
+| `homogeneous` | constant state |
+| `concentrated` | a disk with different fractions on a constant background |
+| `stripes` | pure S \| R \| P bands |
+| `hills` | one smooth Gaussian hill per species |
+| `winding` | species arranged cyclically around a centre (winding number n) |
+| `random_perturbation`, `blobs` | random (seeded) noise or blobs |
+
+The PDE itself is deterministic: σ enters only through the diffusion
+coefficient D = σ²/2.
 
 `make_video(res, path, style="surface")` shows the three densities as 3-D
 surfaces above the mean fractions and the spatial variances.
@@ -127,72 +138,45 @@ A plain boolean `(Nx, Nx)` array is also accepted as `domain=`. Snapshot
 cells outside the domain are `NaN`, and means and variances are taken over
 the domain only.
 
-## Running the examples
+## Examples, grouped by topology
 
 ```bash
-poetry install && poetry run python -m rps_diffusion.examples
+poetry run python -m rps_diffusion.examples                 # all 16 scenarios + examples/GALLERY.md
+poetry run python -m rps_diffusion.examples annulus         # one group
+poetry run python -m rps_diffusion.examples annulus.ring_rotating_wave   # one scenario
+poetry run python -m rps_diffusion.examples --list
 ```
 
-This runs scenarios (a)–(f) in about a minute and a half and writes one summary figure
-and one video per scenario to `examples/output/`. To run a single scenario,
-use for example `poetry run python -m rps_diffusion.examples.b_asymmetric_rates`.
-Videos are MP4 when `ffmpeg` is on the `PATH` and GIF otherwise. MP4 files
-are much smaller; on Windows, `winget install ffmpeg` provides it.
+| group | topology | scenarios |
+|---|---|---|
+| `simply_connected` | no holes: every loop can be shrunk to a point, so any winding pattern needs a phase singularity (spiral core) | square: small bump (ω₀), asymmetric rates, stripe fronts, large cycles, three hills · disk spiral · triangle · L-shaped room · dumbbell (two chambers, narrow channel) |
+| `annulus` | one hole: the phase can wind around the hole without a singularity, giving rotating waves | ring rotating wave (winding 1) · ring double winding (2) · ring hills · square with a hole |
+| `multiply_connected` | several holes: independent windings around each hole; obstacles scatter fronts | two holes (winding around one) · disk with obstacles · porous square (3 × 3 holes) |
 
-Every summary figure has the same layout. The top row shows the mean
-fractions (with ρ* and the T₀ bracket) and the power spectrum (with f₀,
-2f₀ and 3f₀ marked). The bottom row shows the three density surfaces at the
-final time.
+Every scenario produces one video and one summary figure in
+`examples/output/<group>/`. All summary figures share one layout:
 
-## Gallery
+* **Top row:** the mean fractions (with ρ* and the T₀ bracket) and the power
+  spectrum (f₀, 2f₀ and 3f₀ marked).
+* **Middle row:** the **initial** distributions of ρ_S, ρ_R and ρ_P as 3-D
+  surfaces.
+* **Bottom row:** the **final** distributions, on the same z-scale as the
+  middle row.
 
-The pre-rendered outputs live in [`examples/output/`](examples/output/).
+**[examples/GALLERY.md](examples/GALLERY.md)** shows all of them with
+descriptions and the measured quantities: spectral peaks against f₀, and
+winding numbers at the start and at the end. The full run takes about
+4 minutes. Videos are MP4 when `ffmpeg` is on the `PATH` and GIF otherwise;
+on Windows, `winget install ffmpeg` provides it.
 
-**(a) Equal rates λ = 2, concentrated IC.** The measured peak is f = 0.1838;
-the prediction ω₀/2π = λ/(2π√3) is also 0.1838.
+A few highlights:
 
-![a](examples/output/a_omega0.gif)
-![a plot](examples/output/a_omega0.png)
-
-**(b) Rates (λ_S, λ_R, λ_P) = (1, 2, 4).** The measured peak is f = 0.1699
-against the predicted 0.1701. The time-averaged fractions
-(0.5716, 0.1430, 0.2854) match ρ* = (0.5714, 0.1429, 0.2857).
-
-![b](examples/output/b_asymmetric_rates.gif)
-![b plot](examples/output/b_asymmetric_rates.png)
-
-**(c) Stripe IC, λ = 5, σ = 0.03.** Travelling invasion fronts.
-
-![c](examples/output/c_stripe_fronts.gif)
-![c plot](examples/output/c_stripe_fronts.png)
-
-**(d) Shaped domains, rates (2, 3, 4), one hill per species.** A ring, and a
-disk with two holes and a notch. No flux crosses any boundary.
-
-![d ring](examples/output/d_ring.gif)
-![d ring plot](examples/output/d_ring.png)
-![d obstacles](examples/output/d_obstacles.gif)
-![d obstacles plot](examples/output/d_obstacles.png)
-
-**(e) Square, far from equilibrium: large oscillations.** The run starts
-with Scissors dominating, (0.80, 0.12, 0.08), plus a gentle tilt across the
-square. The mean fractions swing between about 0.02 and 0.8. Because the
-dynamics are nonlinear, the period is about 20 % longer than T₀.
-
-![e](examples/output/e_square_large_cycles.gif)
-![e plot](examples/output/e_square_large_cycles.png)
-
-**(f) Square, non-flat start.** One smooth hill per species (`hills()`): S
-at the lower left, R at the lower right, P at the top. The hills turn into
-rotating fronts that reflect off the no-flux walls.
-
-![f](examples/output/f_square_hills.gif)
-![f plot](examples/output/f_square_hills.png)
-
-All initial conditions in the examples are deterministic, and the PDE
-itself has no random terms: σ enters only through the diffusion coefficient
-D = σ²/2. `random_perturbation` and `blobs` are available if you want
-random initial states.
+| | |
+|---|---|
+| ![ring](examples/output/annulus/ring_rotating_wave.gif) | ![disk spiral](examples/output/simply_connected/disk_spiral.gif) |
+| ring, winding 1: a rotating wave around the hole | disk, same start: a spiral around the centre |
+| ![dumbbell](examples/output/simply_connected/dumbbell_chambers.gif) | ![porous](examples/output/multiply_connected/porous_square_fronts.gif) |
+| dumbbell: two chambers coupled through a channel | porous square: fronts scattering off holes |
 
 ## Numerics
 
@@ -222,7 +206,9 @@ random initial states.
   * mass conservation on several shapes;
   * the fixed point $\rho^*$ and the Jacobian eigenvalues $\pm i\omega_0$;
   * the measured $\omega_0$ and mean $\rho^*$ of the full PDE, for equal and
-    unequal rates.
+    unequal rates;
+  * the winding-number diagnostic, and that every example scenario is well
+    formed.
 
 ## Project layout
 
@@ -230,7 +216,9 @@ random initial states.
 rps_diffusion/
 ├── pyproject.toml
 ├── README.md
-├── examples/output/     # rendered videos and summary figures
+├── examples/
+│   ├── GALLERY.md       # generated gallery of all scenarios
+│   └── output/<group>/  # rendered videos and summary figures
 ├── rps_diffusion/
 │   ├── __init__.py
 │   ├── _numerics.py     # masked Neumann Laplacian, CFL limit
@@ -238,7 +226,7 @@ rps_diffusion/
 │   ├── initial.py       # initial-condition factories
 │   ├── simulator.py     # RPSSimulator, SimResult, fixed_point, omega0
 │   ├── visualize.py     # make_video, plot_fractions, plot_surfaces, ...
-│   ├── analysis.py      # frequency_spectrum, dominant_frequencies
-│   └── examples/        # scenarios (a)–(f), python -m rps_diffusion.examples
+│   ├── analysis.py      # frequency_spectrum, dominant_frequencies, winding_number
+│   └── examples/        # simply_connected, annulus, multiply_connected groups
 └── tests/
 ```

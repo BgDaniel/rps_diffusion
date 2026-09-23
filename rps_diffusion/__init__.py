@@ -10,9 +10,9 @@ with three constant interaction rates, on arbitrarily shaped domains with
 no-flux boundary conditions.
 """
 
-from .analysis import dominant_frequencies, frequency_spectrum, plot_spectrum
+from .analysis import dominant_frequencies, frequency_spectrum, plot_spectrum, winding_number
 from .domain import Domain
-from .initial import blobs, concentrated, hills, homogeneous, random_perturbation, stripes
+from .initial import blobs, concentrated, hills, homogeneous, random_perturbation, stripes, winding
 from .simulator import RPSSimulator, SimResult, fixed_point, omega0
 from .visualize import describe_parameters, make_video, plot_fractions, plot_snapshot, plot_surfaces
 
@@ -28,6 +28,7 @@ __all__ = [
     "blobs",
     "concentrated",
     "hills",
+    "winding",
     "make_video",
     "plot_fractions",
     "plot_snapshot",
@@ -36,6 +37,7 @@ __all__ = [
     "frequency_spectrum",
     "dominant_frequencies",
     "plot_spectrum",
+    "winding_number",
 ]
 
 __version__ = "0.2.0"

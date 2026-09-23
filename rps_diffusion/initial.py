@@ -14,7 +14,7 @@ import numpy as np
 
 from .domain import grid
 
-__all__ = ["homogeneous", "random_perturbation", "stripes", "blobs", "concentrated", "hills", "normalise"]
+__all__ = ["homogeneous", "random_perturbation", "stripes", "blobs", "concentrated", "hills", "winding", "normalise"]
 
 S, R, P = 0, 1, 2
 
@@ -223,4 +223,49 @@ def hills(
     for k, (cx, cy) in enumerate(centres):
         r2 = (X - cx * L) ** 2 + (Y - cy * L) ** 2
         rho[k] = base[k] / base.sum() + amplitude * np.exp(-r2 / (2 * (width * L) ** 2))
+    return normalise(rho)
+
+
+def winding(
+    Nx: int,
+    L: float = 1.0,
+    centre: tuple[float, float] = (0.5, 0.5),
+    amplitude: float = 0.6,
+    background: tuple[float, float, float] = (1 / 3, 1 / 3, 1 / 3),
+    winding_number: int = 1,
+) -> np.ndarray:
+    """Species arranged cyclically around a centre (a phase that winds once).
+
+    ``ρ_k ∝ background_k · (1 + amplitude · cos(n θ − 2πk/3))`` with ``θ`` the
+    polar angle around ``centre``. Going once around the centre, the dominant
+    species runs through S → R → P ``n`` times. On a ring this pattern cannot
+    unwind and becomes a rotating wave; on a simply connected domain the
+    centre is a phase singularity and the pattern forms a spiral.
+
+    Parameters
+    ----------
+    Nx : int
+        Grid cells per axis.
+    L : float, default 1.0
+        Side length of the bounding square.
+    centre : tuple of float, default (0.5, 0.5)
+        Centre of the winding in units of ``L``.
+    amplitude : float, default 0.6
+        Relative modulation strength in ``[0, 1]``.
+    background : tuple of float, default (1/3, 1/3, 1/3)
+        State that is modulated, e.g. the fixed point ``fixed_point(rates)``.
+    winding_number : int, default 1
+        How often the phase winds around the centre (sign sets the sense).
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(3, Nx, Nx)``.
+    """
+    X, Y = grid(Nx, L)
+    theta = np.arctan2(Y - centre[1] * L, X - centre[0] * L)
+    base = np.asarray(background, dtype=float)
+    base = base / base.sum()
+    phases = 2 * np.pi * np.arange(3) / 3
+    rho = base[:, None, None] * (1 + amplitude * np.cos(winding_number * theta[None] - phases[:, None, None]))
     return normalise(rho)

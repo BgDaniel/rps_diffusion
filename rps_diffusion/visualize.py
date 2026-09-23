@@ -132,6 +132,7 @@ def plot_surfaces(
     index: int = -1,
     fig: Figure | None = None,
     axes: list[Axes] | None = None,
+    zlim: tuple[float, float] | None = None,
 ) -> Figure:
     """Show one snapshot as three 3-D surface plots, one per species.
 
@@ -146,6 +147,9 @@ def plot_surfaces(
     axes : list of Axes, optional
         Three existing 3-D axes to draw into (``projection='3d'``). If
         omitted, a row of three is added to ``fig``.
+    zlim : tuple of float, optional
+        Common z-range. Defaults to the range of this snapshot; pass the same
+        value for several snapshots to make them directly comparable.
 
     Returns
     -------
@@ -160,7 +164,8 @@ def plot_surfaces(
     fig = axes[0].figure
     i = index % len(result.t)
     sl, X, Y = _surface_grid(result)
-    zlim = _surface_zlim(result, [i])
+    if zlim is None:
+        zlim = _surface_zlim(result, [i])
     for ax, k, name in zip(axes, range(3), SPECIES):
         _setup_surface_axes(ax, name, result.L, zlim)
         _draw_surface(ax, X, Y, result.snapshots[i][k][sl, sl], name, zlim)
