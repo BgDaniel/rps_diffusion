@@ -1,0 +1,27 @@
+[project]
+name = "rps-diffusion"
+version = "0.1.0"
+description = "Simulator for the cyclic Rock-Paper-Scissors reaction-diffusion PDE with spatially varying interaction rate."
+authors = [{ name = "Daniel Berger", email = "daniel.bergermat@t-online.de" }]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pillow>=10.0",
+    "tqdm>=4.66",
+]
+
+[tool.poetry]
+packages = [{ include = "rps_diffusion" }]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
